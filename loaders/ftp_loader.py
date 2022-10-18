@@ -5,8 +5,9 @@ from tqdm import tqdm
 import ftplib
 
 class TQDMWrapperForFTP:
-    def __init__(self, t, total_size=None):
+    def __init__(self, t, rest=None, total_size=None):
         self.t = t
+        self.t.update(rest)
         self.t.total = total_size
 
     def upload_callback(self, buf):
@@ -33,15 +34,20 @@ class FtpLoader:
 
         out_dir.mkdir(parents=True, exist_ok=True)
         out_path = out_dir/file_path.name
-        with open(out_path, "wb") as file:
+
+        rest = 0
+        if out_path.exists():
+            rest = os.stat(out_path).st_size
+
+        with open(out_path, "ab") as file:
             with tqdm(unit='B',
                       unit_scale=True,
                       unit_divisor=1024,
                       ascii=True,
                       desc="Download from FTP") as t:
-                tqdm_wrapper = TQDMWrapperForFTP(t, file_size)
+                tqdm_wrapper = TQDMWrapperForFTP(t, rest, file_size)
                 callback = lambda block: tqdm_wrapper.download_callback(block, file.write)
-                self.ftp.retrbinary(f"RETR {file_path}", callback=callback)
+                self.ftp.retrbinary(f"RETR {file_path}", callback=callback, rest=rest)
 
     def upload(self, file_path: Path, ftp_dir: Path):
         self.__ftp_mkdir(ftp_dir)
