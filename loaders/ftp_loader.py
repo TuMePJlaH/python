@@ -1,48 +1,67 @@
+import os
 import argparse
 from pathlib import Path
 from tqdm import tqdm
 import urllib.request
+import ftplib
+
+#def test_callback(buf):
+#    print('hook', len(i))
+
+class TQDMWrapperForFTP:
+    def __init__(self, t, total_size=None):
+        self.t = t
+        self.t.total = total_size
+
+    def upload_callback(self, buf):
+        self.t.update(len(buf))
+
+    def download_callback(self, buf, write_foo):
+        self.t.update(len(buf))
+        write_foo(buf)
+
 
 class FtpLoader:
     def __init__(self, 
                  address: str, 
                  login: str, 
-                 password: str,
-                 out_dir: Path=Path('./cache')):
-        self.ftp = f"ftp://{login}:{password}@{address}"
+                 password: str):
 
-        self.out_dir = out_dir
-        self.out_dir.mkdir(parents=True, exist_ok=True)
+        self.ftp = ftplib.FTP(address, login, password)
+        self.ftp.encoding = "utf-8"
 
-    def download(self, file_path: Path, progress: bool=True):
-        url = f"{self.ftp}:{file_path}"
-        tmp_file = self.out_dir / file_path.name
+    def download(self, file_path, out_dir):
+        self.ftp.sendcmd("TYPE i") 
+        file_size = self.ftp.size(str(file_path))
+        self.ftp.sendcmd("TYPE A") 
 
-        if not tmp_file.exists():
-            if progress:
-                with tqdm(unit='B', 
-                          unit_scale=True, 
-                          unit_divisor=1024, 
-                          ascii=True,
-                          desc="Downloading from FTP") as t:
-                    urllib.request.urlretrieve(url, tmp_file, self.__tqdm_hook(t))
-            else:
-                urllib.request.urlretrieve(url, tmp_file)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir/file_path.name
+        with open(out_path, "wb") as file:
+            with tqdm(unit='B',
+                      unit_scale=True,
+                      unit_divisor=1024,
+                      ascii=True,
+                      desc="Download from FTP") as t:
+                tqdm_wrapper = TQDMWrapperForFTP(t, file_size)
+                callback = lambda block: tqdm_wrapper.download_callback(block, file.write)
+                self.ftp.retrbinary(f"RETR {file_path}", callback=callback)
 
-    @staticmethod
-    def __tqdm_hook(t):
-        last_b = [0]
-
-        def update_to(b=1, bsize=1, tsize=None):
-            if tsize is not None:
-                t.total = tsize
-            t.update((b - last_b[0]) * bsize)
-            last_b[0] = b
-
-        return update_to
+    def upload(self, file_path, ftp_dir):
+        self.ftp.mkd(str(ftp_dir))
+        file_size = os.stat(file_path).st_size
+        self.ftp.cwd(str(ftp_dir))
+        with open(file_path, "rb") as file:
+            with tqdm(unit='B',
+                      unit_scale=True,
+                      ascii=True,
+                      desc="Upload to FTP") as t:
+                tqdm_wrapper = TQDMWrapperForFTP(t, file_size)
+                self.ftp.storbinary(f"STOR {file_path.name}", file, callback=tqdm_wrapper.upload_callback)
 
 def main():
     parser = argparse.ArgumentParser()
+
     parser.add_argument(
         "-a", "--address",
         required=True,
@@ -58,21 +77,46 @@ def main():
         required=True,
         help="FTP password")
 
-    parser.add_argument(
-        "-f", "--file_path",
+    subparsers = parser.add_subparsers(
+        title="subcommands", description="valid subcommands", dest='command', required=True
+    )
+    download_parser = subparsers.add_parser(
+        "download", aliases=["d"], help="Download file from ftp"
+    )
+    download_parser.add_argument(
+        "-i", "--input",
         required=True,
         type=Path,
         help="FTP file path")
 
-    parser.add_argument(
-        "-o", "--out_dir",
+    download_parser.add_argument(
+        "-o", "--output",
         default="./cache",
         type=Path,
         help="Output directory [default: ./cache")
 
+    upload_parser = subparsers.add_parser(
+        "upload", aliases=["u"], help="Upload file to ftp"
+    )
+    upload_parser.add_argument(
+        "-i", "--input",
+        required=True,
+        type=Path,
+        help="File path")
+
+    upload_parser.add_argument(
+        "-o", "--output",
+        type=Path,
+        required=True,
+        help="Output directory ot FTP")
+
     args = parser.parse_args()
-    ftp = FtpLoader(args.address, args.login, args.password, args.out_dir)
-    ftp.download(args.file_path)
+
+    ftp = FtpLoader(args.address, args.login, args.password)
+    if args.command in ["download", "d"]:
+        ftp.download(args.input, args.output)
+    elif args.command in ["upload", "u"]:
+        ftp.upload(args.input, args.output)
 
 if __name__ == "__main__":
     main()
