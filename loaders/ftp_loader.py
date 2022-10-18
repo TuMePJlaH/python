@@ -2,11 +2,7 @@ import os
 import argparse
 from pathlib import Path
 from tqdm import tqdm
-import urllib.request
 import ftplib
-
-#def test_callback(buf):
-#    print('hook', len(i))
 
 class TQDMWrapperForFTP:
     def __init__(self, t, total_size=None):
@@ -30,7 +26,7 @@ class FtpLoader:
         self.ftp = ftplib.FTP(address, login, password)
         self.ftp.encoding = "utf-8"
 
-    def download(self, file_path, out_dir):
+    def download(self, file_path: Path, out_dir: Path):
         self.ftp.sendcmd("TYPE i") 
         file_size = self.ftp.size(str(file_path))
         self.ftp.sendcmd("TYPE A") 
@@ -47,17 +43,31 @@ class FtpLoader:
                 callback = lambda block: tqdm_wrapper.download_callback(block, file.write)
                 self.ftp.retrbinary(f"RETR {file_path}", callback=callback)
 
-    def upload(self, file_path, ftp_dir):
-        self.ftp.mkd(str(ftp_dir))
+    def upload(self, file_path: Path, ftp_dir: Path):
+        self.__ftp_mkdir(ftp_dir)
         file_size = os.stat(file_path).st_size
         self.ftp.cwd(str(ftp_dir))
         with open(file_path, "rb") as file:
             with tqdm(unit='B',
                       unit_scale=True,
+                      unit_divisor=1024,
                       ascii=True,
                       desc="Upload to FTP") as t:
                 tqdm_wrapper = TQDMWrapperForFTP(t, file_size)
                 self.ftp.storbinary(f"STOR {file_path.name}", file, callback=tqdm_wrapper.upload_callback)
+
+    def __ftp_mkdir(self, dir_path: Path):
+        tree = []
+
+        while len(str(dir_path)) > 1:
+            tree.append(dir_path)
+            dir_path = dir_path.parent
+
+        for d in tree[::-1]:
+            try:
+                self.ftp.cwd(str(d))
+            except:
+                self.ftp.mkd(str(d))
 
 def main():
     parser = argparse.ArgumentParser()
