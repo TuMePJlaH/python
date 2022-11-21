@@ -3,6 +3,7 @@ import argparse
 from pathlib import Path
 from tqdm import tqdm
 import ftplib
+import yaml
 
 class TQDMWrapperForFTP:
     def __init__(self, t, rest=0, total_size=None):
@@ -75,26 +76,43 @@ class FtpLoader:
             except:
                 self.ftp.mkd(str(d))
 
+# config example:
+# server:
+#   address: <name>
+#   login: <login>
+#   passowrd: <password>
+def read_config(path: Path):
+    with open(path) as f:
+        config = yaml.load(f, Loader=yaml.FullLoader)
+    return {'address' : config['server']['address'],
+            'login' : config['server']['login'],
+            'password' : config['server']['password']}
+
 def main():
+    config_path = Path('./.ftp_loader_config.yaml')
+    config = None
+    if config_path.exists():
+        config = read_config(config_path)
+
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
         "-a", "--address",
-        required=True,
+        required=config is None,
         help="FTP address")
 
     parser.add_argument(
         "-l", "--login",
-        required=True,
+        required=config is None,
         help="FTP login")
 
     parser.add_argument(
         "-p", "--password",
-        required=True,
+        required=config is None,
         help="FTP password")
 
     subparsers = parser.add_subparsers(
-        title="subcommands", description="valid subcommands", dest='command', required=True
+        title="subcommands", description="valid subcommands", dest='command'
     )
     download_parser = subparsers.add_parser(
         "download", aliases=["d"], help="Download file from ftp"
@@ -128,8 +146,14 @@ def main():
 
     args = parser.parse_args()
 
-    ftp = FtpLoader(args.address, args.login, args.password)
-    if args.command in ["download", "d"]:
+    address = args.address if args.address else config['address']
+    login = args.login if args.login else config['login']
+    password = args.password if args.password else config['password']
+
+    ftp = FtpLoader(address, login, password)
+    if not args.command:
+        parser.print_usage()
+    elif args.command in ["download", "d"]:
         ftp.download(args.input, args.output)
     elif args.command in ["upload", "u"]:
         ftp.upload(args.input, args.output)
