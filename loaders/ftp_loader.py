@@ -29,7 +29,7 @@ class FtpLoader:
         self.ftp.encoding = "utf-8"
 
     def download(self, file_path: Path, out_dir: Path):
-        self.ftp.sendcmd("TYPE i") 
+        self.ftp.sendcmd("TYPE I") 
         file_size = self.ftp.size(str(file_path))
         self.ftp.sendcmd("TYPE A") 
 
